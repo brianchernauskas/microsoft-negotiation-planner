@@ -232,10 +232,12 @@ const isMCAE = s => s.agreementType === 'mca-e';
 const isCSP = s => s.agreementType === 'csp';
 const exp = (s, p) => (s.expansionPlans || []).includes(p);
 
-function getProximaInsight(provider, calTier) {
+// Microsoft deals are logged per product line in Deal Calibration, so a line
+// filter keeps a Copilot discount from calibrating Unified Support.
+function getProximaInsight(provider, calTier, line) {
   try {
     const deals = JSON.parse(localStorage.getItem('proxima-deals') || '[]');
-    const provDeals = deals.filter(d => d.provider === provider);
+    const provDeals = deals.filter(d => d.provider === provider && (!line || (d.line || 'estate') === line));
     if (provDeals.length === 0) return null;
     const tierDeals = calTier ? provDeals.filter(d => d.tier === calTier) : [];
     const relevant = tierDeals.length >= 2 ? tierDeals : provDeals;
@@ -540,18 +542,29 @@ function estateHTML(s, lines) {
   const prioLabel = { top: ['prio-top', 'Top priority'], high: ['prio-high', 'High'], med: ['prio-med', 'Medium'], low: ['prio-low', 'Low'] };
   const tradeable = lines.filter(l => l.priority === 'top').map(l => l.name);
   const intro = `<p class="estate-intro">Microsoft's appetite column is the key to the deal. Lines Microsoft is pushing hardest are where it has discretionary funding, and where a commitment from you buys the most. Lines it treats as low priority are where you should expect the least movement and rely on alternatives instead.${tradeable.length ? ` In this estate, <strong>${tradeable.join(', ')}</strong> ${tradeable.length === 1 ? 'is' : 'are'} your strongest trade currency.` : ''}</p>`;
+  const msTier = s.totalMsSpend ? 'ms-' + s.totalMsSpend : null;
+  const insights = {};
+  lines.forEach(l => {
+    insights[l.key] = l.key === 'azure'
+      ? getProximaInsight('azure', AZURE_TO_CAL_TIER[s.annualSpend])
+      : getProximaInsight('microsoft', msTier, l.key);
+  });
+  const dealNote = i => i ? `<div class="line-sub" style="font-weight:600;color:#0E7490;margin-top:3px">Proxima: ${i.count} deal${i.count !== 1 ? 's' : ''}${i.tierMatch ? ' at tier' : ''}, avg ${i.avg}%${i.count > 1 ? ` (${i.lo}–${i.hi}%)` : ''}</div>` : '';
+  const estateDeals = getProximaInsight('microsoft', msTier, 'estate');
+  const calibrated = lines.filter(l => l.key !== 'azure' && insights[l.key]).map(l => l.name);
   const table = `<div class="table-wrap"><table class="estate-table">
     <thead><tr><th>Product line</th><th>Target</th><th>Microsoft appetite</th><th>Primary lever</th><th>2026 pricing event</th></tr></thead>
     <tbody>${lines.map(l => `<tr>
       <td><div class="line-name">${l.name}</div><div class="line-sub">${l.sub}</div></td>
-      <td class="num">${l.lo}–${l.hi}%<div class="line-sub" style="font-weight:400">${l.unit}</div></td>
+      <td class="num">${l.lo}–${l.hi}%<div class="line-sub" style="font-weight:400">${l.unit}</div>${dealNote(insights[l.key])}</td>
       <td><span class="prio ${prioLabel[l.priority][0]}">${prioLabel[l.priority][1]}</span></td>
       <td style="color:var(--text-secondary)">${l.lever}</td>
       <td style="color:var(--text-muted);font-size:.76rem">${l.event}</td>
     </tr>`).join('')}</tbody>
   </table></div>`;
-  const note = `<div class="alert alert-info" style="margin-top:14px;"><span class="alert-icon">📐</span><div><strong>Insist on line-item pricing.</strong> Microsoft prefers to quote a single blended bundle number, which lets a price increase on one line hide behind a discount on another. Ask for every line priced separately against current list, so each discount can be checked against its own target above. The Azure range uses the Azure planner's calibrated model; the other lines are planning ranges until Proxima deal data accumulates for them.</div></div>`;
-  return intro + table + note;
+  const note = `<div class="alert alert-info" style="margin-top:14px;"><span class="alert-icon">📐</span><div><strong>Insist on line-item pricing.</strong> Microsoft prefers to quote a single blended bundle number, which lets a price increase on one line hide behind a discount on another. Ask for every line priced separately against current list, so each discount can be checked against its own target above. The Azure range uses the Azure planner's calibrated model. ${calibrated.length ? `Logged Proxima deals are shown against ${calibrated.join(', ')}; lines without deal data use planning ranges.` : 'The other lines use planning ranges until Microsoft deals are logged by product line in Deal Calibration.'}</div></div>`;
+  const blended = estateDeals ? `<div style="margin-top:10px;padding:10px 14px;background:rgba(14,165,164,.08);border:1px solid rgba(14,165,164,.3);border-radius:8px;font-size:.82rem;"><strong style="color:#0E7490">📊 Proxima whole-estate deals</strong> <span style="color:var(--text-muted)">${estateDeals.count} deal${estateDeals.count !== 1 ? 's' : ''}${estateDeals.tierMatch ? ' at this total-spend tier' : ' across all tiers'}: blended avg <strong>${estateDeals.avg}%</strong>, range <strong>${estateDeals.lo}–${estateDeals.hi}%</strong>. Use as a sanity check on the blended outcome, not as a target for any single line.</span></div>` : '';
+  return intro + table + blended + note;
 }
 
 // ─── Trade matrix ────────────────────────────────────────────────────────────
